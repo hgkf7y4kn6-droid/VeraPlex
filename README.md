@@ -79,6 +79,10 @@ npm run e2e                        # boots the real backend and runs the sync en
 cp .env.example .env && npx expo start
 ```
 
+## Benchmark
+
+`backend/benchmarks/` is a synthetic, seeded pharma benchmark (retrieval, grounded drafting incl. unanswerable cases, prompt injection, noisy extraction) with provisional Tier 2 gates. `python -m benchmarks.run --check` runs offline in CI; `--draft anthropic` scores a real model. See [`backend/benchmarks/README.md`](backend/benchmarks/README.md) for methodology, baselines and limitations. The labels are unreviewed by any domain expert.
+
 ## API at a glance (`/api/v1`)
 
 | Area | Endpoints |
@@ -96,7 +100,7 @@ cp .env.example .env && npx expo start
 
 - **Auth and invites** are tested with generated keys, not a live Supabase project. The Supabase invite call is untested against the real Admin API.
 - **Managed Postgres** specifics (Supabase roles, pooler transaction mode with `set_config(..., true)`) are unverified. `membership` is deliberately outside RLS because the tenant is derived from it.
-- **AI drafting** is tested with a fake Anthropic client, not a live call; the real request shape follows the SDK docs but has not been exercised. No server-side refusal fallback is configured (a refusal returns 502). Quality of Claude's 5-Whys on real pharma data is unevaluated: the planned benchmark (extraction accuracy, hallucination on unanswerable questions) does not exist yet. Prices in config are cached values; confirm before billing.
+- **AI drafting** is tested with a fake Anthropic client, not a live call; the real request shape follows the SDK docs but has not been exercised. No server-side refusal fallback is configured (a refusal returns 502). Quality of Claude's 5-Whys on real pharma data is unevaluated: a first synthetic benchmark exists but has never been run against a real model, and its labels are unreviewed. Prices in config are cached values; confirm before billing.
 - **SOP search** brute-forces cosine in Python over a tenant's chunks (fine at pilot scale; pgvector is the upgrade path). The TEI embedder is untested against a live server. No reranker.
 - **Mobile:** UI is untested on a device or simulator (typecheck, unit tests and an e2e of the sync engine only). No photo capture, no push, and plain state navigation instead of Expo Router. A deviation edited server-side while a device is offline has no conflict UI (creation is conflict-free by idempotency).
 - **AI draft adoption** is audited but not separately e-signed; the human signs when completing the investigation.

@@ -1,0 +1,35 @@
+{
+  "benchmark": "veraplex-pharma-bench",
+  "files": {
+    "corpus.jsonl": {
+      "rows": 16,
+      "sha256": "65ab3a81ecf217e3811c4a0bcd784befcadaa8f83c94babf67312261c1ca6f60"
+    },
+    "extraction.jsonl": {
+      "rows": 234,
+      "sha256": "04f892c0cdbaa5576798c69033de1e4897ae8029e7afa271ede8da259f9618bf"
+    },
+    "grounding.jsonl": {
+      "rows": 24,
+      "sha256": "82ee5d45be5537e23e6d0e416d603fb95ce3b08e69b92ee4693b2e3f84727025"
+    },
+    "injection.jsonl": {
+      "rows": 12,
+      "sha256": "22b158dcd5d2101851b779c2580fad6177f7ff07065f620dfa0c95a2a0f27f45"
+    },
+    "retrieval.jsonl": {
+      "rows": 40,
+      "sha256": "6854922d54888522a10404ace8aaa380ae09f631b1b189b0de64618af8a1c0b9"
+    }
+  },
+  "provenance": {
+    "author": "project-generated (LLM-assisted), seeded generator",
+    "customer_data_included": false,
+    "license": "project-owned; contains no third-party text",
+    "origin": "synthetic",
+    "real_or_public_data_included": false
+  },
+  "review_status": "UNREVIEWED: gold labels have not been checked by a pharmaceutical SME or QA lead",
+  "seed": 20261102,
+  "version": "0.1.0"
+}

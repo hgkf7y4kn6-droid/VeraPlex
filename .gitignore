@@ -5,3 +5,4 @@ __pycache__/
 .env
 .pytest_cache/
 .import_linter_cache/
+benchmarks/reports/

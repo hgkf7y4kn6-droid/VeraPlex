@@ -20,6 +20,7 @@ jobs:
       - run: pip install -e ".[dev]" "psycopg[binary]" cryptography
       - run: lint-imports
       - run: pytest -q
+      - run: python -m benchmarks.run --check
   mobile:
     runs-on: ubuntu-latest
     steps:
