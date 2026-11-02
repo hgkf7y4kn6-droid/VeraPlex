@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./veraplex.db"
     environment: str = "development"
     supabase_url: str | None = None  # e.g. https://<ref>.supabase.co ; enables JWKS verification
+    supabase_service_key: str | None = None  # server-side only; used for the Admin API (invites)
     supabase_jwt_secret: str | None = "dev-only-secret-change-me-32-bytes-min!"  # legacy HS256; set to None in production
     jwt_audience: str = "authenticated"
     reauth_max_age_seconds: int = 120

@@ -72,7 +72,7 @@ Configuration is via `VERAPLEX_*` environment variables (`backend/app/core/confi
 
 ## Known gaps
 
-- **Auth** is tested with generated keys, not a live Supabase project. The Supabase invite call is untested against the real Admin API.
+- **Auth and invites** are tested with generated keys, not a live Supabase project. The Supabase invite call is untested against the real Admin API.
 - **Managed Postgres** specifics (Supabase roles, pooler transaction mode with `set_config(..., true)`) are unverified. `membership` is deliberately outside RLS because the tenant is derived from it.
 - **No real LLM.** `StubModelProvider` returns a deterministic skeleton. LangGraph, the model gateway and pgvector SOP search are not built.
 - **AI draft adoption** is audited but not separately e-signed; the human signs when completing the investigation.

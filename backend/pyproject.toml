@@ -2,7 +2,7 @@
 name = "veraplex-backend"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi", "sqlalchemy>=2", "alembic", "pydantic-settings", "pyjwt", "uvicorn"]
+dependencies = ["httpx", "fastapi", "sqlalchemy>=2", "alembic", "pydantic-settings", "pyjwt", "uvicorn"]
 
 [project.optional-dependencies]
 dev = ["pytest", "httpx", "import-linter", "cryptography", "psycopg[binary]"]
@@ -16,5 +16,5 @@ root_package = "app"
 [[tool.importlinter.contracts]]
 name = "Module layering: higher modules may import lower ones, never the reverse"
 type = "layers"
-layers = ["app.modules.ai", "app.modules.quality", "app.modules.documents", "app.modules.records", "app.modules.audit", "app.modules.identity"]
+layers = ["app.modules.ai", "app.modules.admin", "app.modules.quality", "app.modules.documents", "app.modules.records", "app.modules.audit", "app.modules.identity"]
 containers = []

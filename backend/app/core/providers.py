@@ -75,6 +75,28 @@ class SupabaseAuthProvider:
         )
 
 
+class UserDirectoryProvider(Protocol):
+    def invite(self, email: str) -> str:
+        """Create/invite the identity in the auth system and return its subject (UUID string)."""
+
+
+class SupabaseUserDirectory:
+    """Supabase Admin API invite (service-role key, server-side only). Untested against a live project."""
+
+    def __init__(self, url: str | None, service_key: str | None):
+        self.url, self.key = (url or "").rstrip("/"), service_key
+
+    def invite(self, email: str) -> str:
+        import httpx
+        if not (self.url and self.key):
+            raise AuthError("Supabase Admin API is not configured")
+        r = httpx.post(f"{self.url}/auth/v1/invite", json={"email": email}, timeout=15,
+                       headers={"apikey": self.key, "Authorization": f"Bearer {self.key}"})
+        if r.status_code >= 400:
+            raise AuthError(f"invite failed: {r.status_code}")
+        return r.json()["id"]
+
+
 class AIModelProvider(Protocol):
     def draft(self, task: str, context: dict) -> dict: ...
 
@@ -98,6 +120,7 @@ class StubModelProvider:
         }
 
 
+user_directory: UserDirectoryProvider = SupabaseUserDirectory(settings.supabase_url, settings.supabase_service_key)
 auth_provider: AuthenticationProvider = SupabaseAuthProvider(
     settings.supabase_url, settings.supabase_jwt_secret, settings.jwt_audience
 )
