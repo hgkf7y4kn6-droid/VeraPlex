@@ -117,7 +117,7 @@ def transition(db: Session, p: Principal, r: Record, to: str, machine: StateMach
     return r
 
 
-def _consume_reauth(db: Session, p: Principal, reauth_token: str) -> ReauthEvent:
+def consume_reauth(db: Session, p: Principal, reauth_token: str) -> ReauthEvent:
     """Re-authentication at the moment of signing: the user must have *proved identity* recently
     (Supabase `amr` timestamp, not merely a refreshed token), as the same subject, usable once."""
     try:
@@ -150,7 +150,7 @@ def sign(db: Session, p: Principal, r: Record, meaning: str, reauth_token: str) 
         Signature.record_version_id == v.id, Signature.signer_id == p.user_id, Signature.meaning == meaning
     )).first():
         raise HTTPException(409, "already signed with this meaning")
-    ev = _consume_reauth(db, p, reauth_token)
+    ev = consume_reauth(db, p, reauth_token)
     v.locked = True
     s = Signature(
         tenant_id=p.tenant_id, record_version_id=v.id, signer_id=p.user_id, signer_name=p.name,

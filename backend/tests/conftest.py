@@ -18,16 +18,17 @@ BACKENDS = ["sqlite"] + (["postgres"] if PG_ADMIN_URL else [])
 
 
 def _run_migration(admin_engine):
-    from alembic.config import Config  # noqa: F401
+    import glob
     import importlib.util
-    spec = importlib.util.spec_from_file_location("m0001", "migrations/versions/0001_foundation.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
-    with admin_engine.begin() as conn:
-        with Operations.context(MigrationContext.configure(conn)):
-            mod.upgrade()
+    for path in sorted(glob.glob("migrations/versions/*.py")):
+        spec = importlib.util.spec_from_file_location(os.path.basename(path)[:-3], path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with admin_engine.begin() as conn:
+            with Operations.context(MigrationContext.configure(conn)):
+                mod.upgrade()
 
 
 @pytest.fixture(scope="session")

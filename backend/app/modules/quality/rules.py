@@ -35,3 +35,7 @@ CAPA = StateMachine(
     lock_on_enter={"pending_approval", "closed"},
 )
 REQUIRED_CAPA_APPROVER_ROLES = {"qa", "area_owner"}
+CHANGE_CONTROL = StateMachine(
+    transitions={"open": {"implemented"}, "implemented": {"closed"}},
+    lock_on_enter={"closed"},
+)

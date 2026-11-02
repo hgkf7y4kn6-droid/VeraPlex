@@ -161,3 +161,33 @@ def capa_transition(rid: uuid.UUID, to: str, body: ReasonIn, db: Session = Depen
         raise HTTPException(403, "not permitted for this transition")
     service.capa_transition(db, p, _capa(db, p, rid), to, body.reason)
     return {"state": to}
+
+
+class ChangeControlIn(BaseModel):
+    sop_id: uuid.UUID
+    rationale: str = Field(min_length=3)
+    new_body: str
+
+
+@router.post("/capas/{rid}/change-controls", status_code=201)
+def open_change_control(rid: uuid.UUID, body: ChangeControlIn, p: Principal = Depends(require("change_control.open")),
+                        db: Session = Depends(get_db)):
+    from app.modules.quality import change_control
+    cc = change_control.open_change_control(db, p, _capa(db, p, rid), body.sop_id, body.rationale, body.new_body)
+    return {"change_control_id": cc.record_id, "sop_revision_id": cc.new_revision_id}
+
+
+@router.post("/change-controls/{rid}/close")
+def close_change_control(rid: uuid.UUID, body: ReasonIn, p: Principal = Depends(require("change_control.close")),
+                         db: Session = Depends(get_db)):
+    from app.modules.quality import change_control
+    change_control.close(db, p, change_control.get(db, p, rid), body.reason)
+    return {"state": "closed"}
+
+
+@router.get("/change-controls/{rid}")
+def read_change_control(rid: uuid.UUID, p: Principal = Depends(require("capa.read")), db: Session = Depends(get_db)):
+    from app.modules.quality import change_control
+    cc = change_control.get(db, p, rid)
+    r = records.get_record(db, p, rid, "change_control")
+    return {"id": rid, "state": r.state, "capa_id": cc.capa_id, "sop_id": cc.sop_id, "new_revision_id": cc.new_revision_id}

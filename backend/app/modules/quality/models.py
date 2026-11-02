@@ -36,3 +36,12 @@ class Capa(Base):
     deviation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deviation.record_id"), index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     effectiveness_due: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class ChangeControl(Base):
+    __tablename__ = "change_control"
+    record_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("record.id"), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenant.id"), index=True)
+    capa_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("capa.record_id"), index=True)
+    sop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sop.id"), index=True)
+    new_revision_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sop_revision.record_id"), index=True)

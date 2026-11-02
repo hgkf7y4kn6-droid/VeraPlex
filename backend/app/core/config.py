@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     recurrence_window_days: int = 90
     recurrence_threshold: int = 3
     effectiveness_check_days: int = 90
+    training_due_days: int = 14
 
 
 settings = Settings()
