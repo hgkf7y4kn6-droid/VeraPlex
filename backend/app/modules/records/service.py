@@ -5,12 +5,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-import jwt
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.clock import utcnow
+from app.core import providers
 from app.core.config import settings
 from app.core.security import Principal
 from app.modules.audit import service as audit
@@ -118,21 +118,19 @@ def transition(db: Session, p: Principal, r: Record, to: str, machine: StateMach
 
 
 def _consume_reauth(db: Session, p: Principal, reauth_token: str) -> ReauthEvent:
-    """Re-authentication at the moment of signing: a fresh token for the same subject, usable once."""
+    """Re-authentication at the moment of signing: the user must have *proved identity* recently
+    (Supabase `amr` timestamp, not merely a refreshed token), as the same subject, usable once."""
     try:
-        data = jwt.decode(
-            reauth_token, settings.supabase_jwt_secret, algorithms=["HS256"], audience=settings.jwt_audience,
-            options={"require": ["sub", "exp", "iat", "jti"]},
-        )
-    except jwt.PyJWTError as exc:
+        c = providers.auth_provider.verify(reauth_token)
+    except providers.AuthError as exc:
         raise HTTPException(401, "re-authentication failed") from exc
-    if data["sub"] != str(p.user_id):
+    if c.sub != str(p.user_id):
         raise HTTPException(401, "re-authentication does not match the signer")
-    if time.time() - data["iat"] > settings.reauth_max_age_seconds:
+    if time.time() - c.authenticated_at > settings.reauth_max_age_seconds:
         raise HTTPException(401, "re-authentication is too old; sign in again")
-    if db.scalars(select(ReauthEvent).where(ReauthEvent.jti == data["jti"])).first():
+    if db.scalars(select(ReauthEvent).where(ReauthEvent.jti == c.token_id)).first():
         raise HTTPException(401, "re-authentication token already used")
-    ev = ReauthEvent(tenant_id=p.tenant_id, user_id=p.user_id, jti=data["jti"], at=utcnow())
+    ev = ReauthEvent(tenant_id=p.tenant_id, user_id=p.user_id, jti=c.token_id, at=utcnow())
     db.add(ev)
     db.flush()
     return ev

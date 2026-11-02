@@ -8,6 +8,20 @@ from app.modules.audit.models import AuditEvent
 from tests.conftest import token
 
 API = "/api/v1"
+
+
+from contextlib import contextmanager
+
+from app.core.database import set_tenant_guc
+
+
+@contextmanager
+def scoped(Session, tenant_id):
+    """A DB session with the RLS tenant setting applied, as the API does per request."""
+    with Session() as db:
+        set_tenant_guc(db, tenant_id)
+        yield db
+
 NEW = {"title": "Pressure drop on filler", "description": "x", "equipment_id": "EQ-7", "batch_id": "B1"}
 
 
@@ -52,28 +66,29 @@ def test_full_flow_and_audit_chain(client, team, Session):
     r = client.post(f"{API}/capas/{cid}/transition/approved", json={"reason": "both signed"}, headers=h(team["qa"]))
     assert r.status_code == 200, r.text
     assert client.get(f"{API}/capas/{cid}", headers=h(team["qa"])).json()["effectiveness_due"] is not None
-    with Session() as db:
+    with scoped(Session, team["t"]) as db:
         assert audit.verify_chain(db, team["t"])["ok"]
         acts = {e.action for e in db.scalars(select(AuditEvent))}
         assert {"deviation.create", "capa.sign", "capa.transition", "capa.effectiveness_scheduled"} <= acts
     assert client.get(f"{API}/audit/verify", headers=h(team["admin"])).json()["ok"] is True
 
 
-def test_audit_tamper_detected_and_append_only(client, team, Session):
+def test_audit_tamper_detected_and_append_only(client, team, Session, admin_engine, dialect):
     make_capa_pending(client, team)
-    with Session() as db:
-        with pytest.raises(Exception):
-            db.execute(text("update audit_event set reason='x'")); db.commit()
-        db.rollback()
-        with pytest.raises(Exception):
-            db.execute(text("delete from audit_event")); db.commit()
-        db.rollback()
-    # simulate an out-of-band edit by dropping the guard, as a DBA with raw access could
-    with Session() as db:
-        db.execute(text("drop trigger audit_event_no_update"))
-        db.execute(text("update audit_event set reason='tampered' where seq=2")); db.commit()
+    for stmt in ("update audit_event set reason='x'", "delete from audit_event"):
+        with Session() as db:
+            with pytest.raises(Exception) as e:
+                db.execute(text(stmt)); db.commit()
+            if dialect == "postgres":
+                assert "permission denied" in str(e.value)  # REVOKE, not a trigger
+    # a DBA with raw superuser access bypasses the guard; the chain must still expose it
+    with admin_engine.begin() as c:
+        if dialect == "sqlite":
+            c.execute(text("drop trigger audit_event_no_update"))
+        c.execute(text("update audit_event set reason='tampered' where seq=2"))
+    with scoped(Session, team["t"]) as db:
         res = audit.verify_chain(db, team["t"])
-    assert res == {**res, "ok": False, "break_at_seq": 2, "reason": "hash mismatch"}
+    assert res["ok"] is False and res["break_at_seq"] == 2 and res["reason"] == "hash mismatch"
 
 
 def test_signature_requires_fresh_single_use_matching_reauth(client, team):
@@ -107,7 +122,7 @@ def test_locked_version_is_immutable(client, team, Session):
     from app.modules.records import service as rs
     from app.modules.records.models import Record
     from app.core.security import principal_from_user
-    with Session() as db:
+    with scoped(Session, team["t"]) as db:
         p = principal_from_user(db, team["inv"])
         r = db.get(Record, uuid.UUID(cid))
         with pytest.raises(Exception) as e:
@@ -147,7 +162,7 @@ def test_ai_draft_labeled_cited_and_adoption_audited(client, team, Session):
     # AI cannot adopt its own draft; a human can
     assert client.post(f"{API}/ai-drafts/{d.json()['id']}/adopt", json={"reason": "ok ok"}, headers=h(team["ai"])).status_code == 403
     assert client.post(f"{API}/ai-drafts/{d.json()['id']}/adopt", json={"reason": "reviewed"}, headers=h(team["inv"])).status_code == 200
-    with Session() as db:
+    with scoped(Session, team["t"]) as db:
         kinds = {(e.action, e.actor_kind) for e in db.scalars(select(AuditEvent))}
         assert ("ai_draft.create", "ai") in kinds and ("ai_draft.adopt", "human") in kinds
         assert audit.verify_chain(db, team["t"])["ok"]
@@ -176,3 +191,25 @@ def test_tenant_isolation(client, world, team):
 def test_auth_required(client):
     assert client.get(f"{API}/deviations").status_code == 401
     assert client.get(f"{API}/deviations", headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+@pytest.mark.parametrize("_", [0])
+def test_rls_backstop_blocks_cross_tenant_even_without_app_filters(client, team, world, Session, dialect, _):
+    """Postgres only: bypass FastAPI/service filters entirely and query tables directly."""
+    if dialect != "postgres":
+        pytest.skip("RLS is Postgres-specific")
+    other = world.tenant("rival")
+    client.post(f"{API}/deviations", json=NEW, headers=h(team["op"]))
+    with Session() as db:  # no tenant GUC set at all -> sees nothing
+        assert db.execute(text("select count(*) from record")).scalar() == 0
+        assert db.execute(text("select count(*) from audit_event")).scalar() == 0
+    with Session() as db:
+        db.execute(text("select set_config('app.tenant_id', :t, true)"), {"t": str(other)})
+        assert db.execute(text("select count(*) from record")).scalar() == 0
+        assert db.execute(text("select count(*) from deviation")).scalar() == 0
+        with pytest.raises(Exception):  # WITH CHECK: cannot write a row into another tenant
+            db.execute(text("insert into record (id, tenant_id, type, state, current_version_no, created_by, created_at) "
+                            "values (gen_random_uuid(), :t, 'x', 'x', 1, gen_random_uuid(), now())"), {"t": str(team["t"])})
+    with Session() as db:
+        db.execute(text("select set_config('app.tenant_id', :t, true)"), {"t": str(team["t"])})
+        assert db.execute(text("select count(*) from record")).scalar() == 1

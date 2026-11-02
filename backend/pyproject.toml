@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 dependencies = ["fastapi", "sqlalchemy>=2", "alembic", "pydantic-settings", "pyjwt", "uvicorn"]
 
 [project.optional-dependencies]
-dev = ["pytest", "httpx", "import-linter"]
+dev = ["pytest", "httpx", "import-linter", "cryptography", "psycopg[binary]"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
