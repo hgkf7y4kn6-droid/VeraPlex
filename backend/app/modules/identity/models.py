@@ -10,6 +10,8 @@ class Tenant(Base):
     __tablename__ = "tenant"
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(200))
+    # Confidential content may reach an outside model provider only if an administrator opted in.
+    ai_external_inference: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class User(Base):

@@ -139,6 +139,8 @@ def make_effective(db: Session, p: Principal, rev: SopRevision) -> list[Training
         entity_type="sop_revision", entity_id=rev.record_id, new={"assigned": len(out), "roles": roles},
         reason="assigned automatically when revision became effective",
     )
+    from app.modules.documents import search
+    search.index_revision(db, p.tenant_id, rev, sop, content)
     for hook in _effective_hooks:
         hook(db, p, rev)
     return out

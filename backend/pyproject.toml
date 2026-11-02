@@ -2,7 +2,7 @@
 name = "veraplex-backend"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["httpx", "fastapi", "sqlalchemy>=2", "alembic", "pydantic-settings", "pyjwt", "uvicorn"]
+dependencies = ["anthropic", "httpx", "fastapi", "sqlalchemy>=2", "alembic", "pydantic-settings", "pyjwt", "uvicorn"]
 
 [project.optional-dependencies]
 dev = ["pytest", "httpx", "import-linter", "cryptography", "psycopg[binary]"]

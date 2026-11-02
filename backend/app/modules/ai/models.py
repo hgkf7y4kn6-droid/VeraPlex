@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Uuid
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base, new_id
@@ -16,6 +16,8 @@ class AiRun(Base):
     agent: Mapped[str] = mapped_column(String(40))
     model_name: Mapped[str] = mapped_column(String(80))
     model_version: Mapped[str] = mapped_column(String(40))
+    provider: Mapped[str] = mapped_column(String(40), default="local", server_default="local")
+    external: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     prompt_version: Mapped[str] = mapped_column(String(40))
     inputs: Mapped[dict] = mapped_column(JSON)
     source_record_ids: Mapped[list] = mapped_column(JSON)

@@ -97,31 +97,91 @@ class SupabaseUserDirectory:
         return r.json()["id"]
 
 
+@dataclass(frozen=True)
+class DraftResult:
+    output: dict
+    input_tokens: int
+    output_tokens: int
+    model: str
+    version: str
+
+
 class AIModelProvider(Protocol):
-    def draft(self, task: str, context: dict) -> dict: ...
+    name: str
+    external: bool  # True when content leaves our infrastructure
 
-
-class StubModelProvider:
-    """Deterministic placeholder so the pipeline, audit and governance are testable without an LLM.
-    A real provider implements the same interface behind the model gateway."""
-
-    name = "stub"
-    version = "0"
-
-    def draft(self, task: str, context: dict) -> dict:
-        deviation = context["deviation"]
-        related = context["related"]
-        return {
-            "five_whys": [
-                {"why": i + 1, "question": "Why?", "answer": "TO BE COMPLETED BY INVESTIGATOR"} for i in range(5)
-            ],
-            "fishbone_categories": ["Man", "Machine", "Method", "Material", "Measurement", "Environment"],
-            "summary": f"Draft for: {deviation['title']}. {len(related)} related prior event(s) found.",
-        }
+    def draft(self, task: str, context: dict) -> DraftResult: ...
 
 
 user_directory: UserDirectoryProvider = SupabaseUserDirectory(settings.supabase_url, settings.supabase_service_key)
 auth_provider: AuthenticationProvider = SupabaseAuthProvider(
     settings.supabase_url, settings.supabase_jwt_secret, settings.jwt_audience
 )
-model_provider: AIModelProvider = StubModelProvider()
+
+
+# ---------------------------------------------------------------- embeddings / retrieval
+import math
+import re
+import zlib
+
+_STOP = set("a an and are as at be by for from has have in is it its of on or that the this to was were will with not no if then than but when which who".split())
+
+
+def _tokens(text: str) -> list[str]:
+    out = []
+    for w in re.findall(r"[a-z0-9]+", text.lower()):
+        if w in _STOP or len(w) < 2:
+            continue
+        for suf in ("ing", "ed", "es", "s"):
+            if len(w) > len(suf) + 3 and w.endswith(suf):
+                w = w[: -len(suf)]
+                break
+        out.append(w)
+    return out
+
+
+class EmbeddingProvider(Protocol):
+    name: str
+
+    def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class HashingEmbedder:
+    """Deterministic, offline, lexical (unigram+bigram feature hashing). Not semantic: it is the dev/test
+    default and a floor for the eval; production should set VERAPLEX_EMBEDDING_URL to a TEI server."""
+
+    name = "hashing-v1-512"
+    dim = 512
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [self._one(t) for t in texts]
+
+    def _one(self, text: str) -> list[float]:
+        toks = _tokens(text)
+        v = [0.0] * self.dim
+        feats = toks + [f"{a}_{b}" for a, b in zip(toks, toks[1:])]
+        for f in feats:
+            h = zlib.crc32(f.encode())
+            v[h % self.dim] += 1.0 if (h >> 16) & 1 else -1.0
+        # sublinear scaling then L2 normalise
+        v = [math.copysign(math.log1p(abs(x)), x) for x in v]
+        n = math.sqrt(sum(x * x for x in v)) or 1.0
+        return [x / n for x in v]
+
+
+class TEIEmbedder:
+    """Hugging Face text-embeddings-inference (`POST /embed`). Untested against a live server."""
+
+    def __init__(self, url: str, model: str):
+        self.url, self.name = url.rstrip("/"), f"tei:{model}"
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import httpx
+        r = httpx.post(f"{self.url}/embed", json={"inputs": texts, "normalize": True, "truncate": True}, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+
+embedder: EmbeddingProvider = (
+    TEIEmbedder(settings.embedding_url, settings.embedding_model) if settings.embedding_url else HashingEmbedder()
+)

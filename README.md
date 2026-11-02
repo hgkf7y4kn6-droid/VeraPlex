@@ -11,10 +11,10 @@ Built from the *Pharmaceutical Intelligence Platform — Build Plan*. It is gree
 A single FastAPI **modular monolith** (`backend/`). Modules own their tables and may import only modules below them; `import-linter` enforces this in CI.
 
 ```
-ai          Quality agent: non-human principal, read-scoped tools, draft-only writes
+ai          Quality agent: non-human principal, SOP-grounded drafts via Claude (opt-in) or local, citation validation
 admin       user provisioning (Supabase invite), role changes, deactivation
 quality     deviation, investigation, CAPA, change control, deterministic risk + recurrence rules
-documents   SOPs as controlled revisions, training assignment, acknowledgments, reminders
+documents   SOPs as controlled revisions, training assignment, acknowledgments, reminders, search over effective SOPs
 records     versioned controlled records, state machines, re-auth e-signatures
 audit       hash-chained append-only audit trail
 identity    tenant, user, membership
@@ -33,6 +33,7 @@ Key controls:
 ## Repository layout
 
 ```
+mobile/                            Expo client: offline deviation capture, durable outbox, idempotent sync
 backend/
   app/{core,modules,api,workers}/   application code
   migrations/versions/              Alembic: schema, RLS policies, append-only grants
@@ -57,6 +58,27 @@ VERAPLEX_TEST_PG_URL='postgresql+psycopg://postgres:postgres@localhost:5432/post
 
 Configuration is via `VERAPLEX_*` environment variables (`backend/app/core/config.py`): `DATABASE_URL`, `ENVIRONMENT`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_KEY`, and the rule parameters (recurrence window, training due days, ...). Apply the schema with Alembic (`alembic upgrade head`) and create the `veraplex_app` role first; connect the app as that role.
 
+## AI drafting and SOP search
+
+1. `GET /sops/search` ranks passages of **effective** SOP revisions only (a superseded or draft revision is never returned). Passages are indexed when a revision becomes effective; `POST /sops/reindex` rebuilds after an embedder change.
+2. `POST /deviations/{id}/ai-draft` runs the Quality agent as the tenant's AI principal: it reads the deviation, prior events on the same equipment and SOP passages (each needs the AI principal's own permissions), then drafts a 5-Whys and fishbone.
+3. **Tenants opt in** to sending content to an outside model (`PUT /admin/tenant/ai-settings`, admin only, audited). Without it, or without an API key, the deterministic local provider runs and nothing leaves the system.
+4. With opt-in, Claude (`claude-opus-5-5` by default, `VERAPLEX_AI_MODEL`) is called through the official SDK with a JSON-schema-constrained reply. Record text is HTML-escaped inside `<source>` tags and the system prompt treats it as untrusted data.
+5. **Output is never trusted:** citations must name a supplied source id; invented ones are dropped, and claims left without support are flagged `unsupported` and downgraded to `insufficient_evidence`. Each run stores provider, model, prompt version, sources, tokens and cost; a per-tenant daily token budget applies.
+
+Embeddings: `VERAPLEX_EMBEDDING_URL` points at a Hugging Face text-embeddings-inference server; unset, an offline lexical hashing embedder is used (scores 8/8 recall@3 on the small fixed eval in `tests/test_sop_search.py`; it is lexical, not semantic).
+
+## Mobile (Expo)
+
+`mobile/` captures deviations offline. Saves go to a durable on-device outbox first; a sync engine sends them with an `Idempotency-Key` (so a lost response or app kill can never create a duplicate), backs off on network/5xx errors, pauses on 401, and marks validation/permission rejections as failed for the user to fix. Client-reported times are stored as claims; the server stamps authoritative time.
+
+```bash
+cd mobile && npm ci
+npm run typecheck && npm test      # sync-engine unit tests
+npm run e2e                        # boots the real backend and runs the sync engine against it
+cp .env.example .env && npx expo start
+```
+
 ## API at a glance (`/api/v1`)
 
 | Area | Endpoints |
@@ -64,19 +86,21 @@ Configuration is via `VERAPLEX_*` environment variables (`backend/app/core/confi
 | Deviations | `POST/GET /deviations`, `POST /deviations/{id}/triage`, `.../investigation`, `.../capas`, `.../ai-draft` |
 | Investigations | `PUT /investigations/{id}`, `POST .../complete` (e-sign) |
 | CAPA | `GET /capas/{id}`, `.../submit`, `.../sign`, `.../transition/{state}`, `.../change-controls` |
-| SOPs | `POST/GET /sops`, `.../revisions`, `/sop-revisions/{id}/{submit,sign,approve,make-effective}`, `/sops/reminders` |
+| SOPs | `POST/GET /sops`, `GET /sops/search`, `.../revisions`, `/sop-revisions/{id}/{submit,sign,approve,make-effective}`, `/sops/reminders` |
 | Training | `GET /me/training`, `POST /training/{id}/acknowledge` (re-auth) |
 | AI | `POST /ai-drafts/{id}/adopt` |
 | Audit | `GET /audit/events`, `GET /audit/verify` |
-| Admin | `POST /admin/users`, `PATCH /admin/users/{id}`, `GET /admin/users` |
+| Admin | `POST /admin/users`, `PATCH /admin/users/{id}`, `GET /admin/users`, `PUT /admin/tenant/ai-settings`, `GET /me` |
 
 ## Known gaps
 
 - **Auth and invites** are tested with generated keys, not a live Supabase project. The Supabase invite call is untested against the real Admin API.
 - **Managed Postgres** specifics (Supabase roles, pooler transaction mode with `set_config(..., true)`) are unverified. `membership` is deliberately outside RLS because the tenant is derived from it.
-- **No real LLM.** `StubModelProvider` returns a deterministic skeleton. LangGraph, the model gateway and pgvector SOP search are not built.
+- **AI drafting** is tested with a fake Anthropic client, not a live call; the real request shape follows the SDK docs but has not been exercised. No server-side refusal fallback is configured (a refusal returns 502). Quality of Claude's 5-Whys on real pharma data is unevaluated: the planned benchmark (extraction accuracy, hallucination on unanswerable questions) does not exist yet. Prices in config are cached values; confirm before billing.
+- **SOP search** brute-forces cosine in Python over a tenant's chunks (fine at pilot scale; pgvector is the upgrade path). The TEI embedder is untested against a live server. No reranker.
+- **Mobile:** UI is untested on a device or simulator (typecheck, unit tests and an e2e of the sync engine only). No photo capture, no push, and plain state navigation instead of Expo Router. A deviation edited server-side while a device is offline has no conflict UI (creation is conflict-free by idempotency).
 - **AI draft adoption** is audited but not separately e-signed; the human signs when completing the investigation.
 - **SOP control:** effective date is always "now"; no attachments/PDF rendering; reminders are a function/endpoint with no scheduler or notifications.
 - **Risk-matrix cut-offs** (`quality/rules.py`) are provisional pending QA-lead sign-off.
-- **Not built:** Expo client and offline capture, S3 documents, Celery jobs / transactional outbox, entitlements and billing, site-scoped roles, 3D views, the other modules.
+- **Not built:** photos/S3 documents, Celery jobs / transactional outbox, entitlements and billing, site-scoped roles, 3D views, the other modules.
 - The requirements matrix (clause → control → test → evidence) is not generated yet.

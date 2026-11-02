@@ -15,6 +15,17 @@ class Settings(BaseSettings):
     recurrence_threshold: int = 3
     effectiveness_check_days: int = 90
     training_due_days: int = 14
+    # Retrieval
+    embedding_url: str | None = None  # text-embeddings-inference base URL; unset -> local hashing embedder
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Generation. External inference is off per tenant unless an administrator opts in.
+    anthropic_api_key: str | None = None  # falls back to ANTHROPIC_API_KEY in the SDK when unset
+    ai_model: str = "claude-opus-5-5"
+    ai_effort: str = "medium"
+    ai_max_output_tokens: int = 8000
+    ai_daily_token_budget: int = 2_000_000
+    ai_input_usd_per_mtok: float = 4.0  # price table cached 2026-10-06; confirm before billing customers
+    ai_output_usd_per_mtok: float = 20.0
 
 
 settings = Settings()

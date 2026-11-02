@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import JSON, Date, Text, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base, new_id
@@ -53,3 +53,17 @@ class Acknowledgment(Base):
     content_hash: Mapped[str] = mapped_column(String(64))
     acknowledged_at: Mapped[datetime] = mapped_column(DateTime)
     reauth_event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reauth_event.id"))
+
+
+class SopChunk(Base):
+    """Searchable passage of an effective SOP revision. Embeddings are stored as JSON and scored in
+    process (fine at pilot scale); pgvector is the upgrade path once corpus size justifies it."""
+    __tablename__ = "sop_chunk"
+    __table_args__ = (UniqueConstraint("revision_id", "chunk_no", "embedder"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenant.id"), index=True)
+    revision_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sop_revision.record_id"), index=True)
+    chunk_no: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(JSON)
+    embedder: Mapped[str] = mapped_column(String(80))

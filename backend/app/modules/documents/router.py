@@ -61,6 +61,18 @@ def list_sops(p: Principal = Depends(require("sop.read")), db: Session = Depends
             for s in db.scalars(select(Sop).where(Sop.tenant_id == p.tenant_id).order_by(Sop.doc_number))]
 
 
+@router.get("/sops/search")
+def search_sops(q: str, k: int = 5, p: Principal = Depends(require("sop.read")), db: Session = Depends(get_db)):
+    from app.modules.documents import search
+    return search.search(db, p, q[:500], max(1, min(k, 20)))
+
+
+@router.post("/sops/reindex")
+def reindex(p: Principal = Depends(require("sop.admin")), db: Session = Depends(get_db)):
+    from app.modules.documents import search
+    return {"chunks": search.reindex_all(db, p)}
+
+
 @router.get("/sops/reminders")
 def reminders(p: Principal = Depends(require("sop.admin")), db: Session = Depends(get_db)):
     return service.reminders(db, p.tenant_id, utcnow().date())

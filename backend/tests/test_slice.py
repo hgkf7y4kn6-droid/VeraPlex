@@ -158,7 +158,7 @@ def test_ai_draft_labeled_cited_and_adoption_audited(client, team, Session):
     d = client.post(f"{API}/deviations/{dev}/ai-draft", json={"investigation_id": inv}, headers=h(team["inv"]))
     assert d.status_code == 201, d.text
     body = d.json()["content"]
-    assert "AI-GENERATED DRAFT" in body["label"] and prior in body["sources"] and dev in body["sources"]
+    assert "AI-GENERATED DRAFT" in body["label"] and f"dev:{prior}" in body["sources"] and f"dev:{dev}" in body["sources"]
     # AI cannot adopt its own draft; a human can
     assert client.post(f"{API}/ai-drafts/{d.json()['id']}/adopt", json={"reason": "ok ok"}, headers=h(team["ai"])).status_code == 403
     assert client.post(f"{API}/ai-drafts/{d.json()['id']}/adopt", json={"reason": "reviewed"}, headers=h(team["inv"])).status_code == 200

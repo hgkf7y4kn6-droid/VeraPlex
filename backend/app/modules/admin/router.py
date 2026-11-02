@@ -54,3 +54,27 @@ def patch(user_id: uuid.UUID, body: PatchIn, p: Principal = Depends(require("use
     if body.active is False:
         service.deactivate(db, p, user_id, body.reason)
     return {"ok": True}
+
+
+class AiSettingsIn(BaseModel):
+    external_inference: bool
+    reason: str = Field(min_length=3)
+
+
+@router.get("/tenant")
+def tenant_settings(p: Principal = Depends(require("user.manage")), db: Session = Depends(get_db)):
+    from app.modules.identity.models import Tenant
+    t = db.get(Tenant, p.tenant_id)
+    return {"tenant_id": t.id, "name": t.name, "ai_external_inference": t.ai_external_inference}
+
+
+@router.put("/tenant/ai-settings")
+def set_ai_settings(body: AiSettingsIn, p: Principal = Depends(require("user.manage")), db: Session = Depends(get_db)):
+    from app.modules.audit import service as audit
+    from app.modules.identity.models import Tenant
+    t = db.get(Tenant, p.tenant_id)
+    old, t.ai_external_inference = t.ai_external_inference, body.external_inference
+    audit.record_event(db, tenant_id=p.tenant_id, actor_id=p.user_id, actor_kind=p.kind, action="tenant.ai_settings",
+                       entity_type="tenant", entity_id=t.id, old={"ai_external_inference": old},
+                       new={"ai_external_inference": body.external_inference}, reason=body.reason)
+    return {"ai_external_inference": t.ai_external_inference}
