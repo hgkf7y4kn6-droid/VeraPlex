@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from app.core.config import assert_production_safe
 from app.core.database import Base, engine, install_append_only
-from app.modules.admin.router import router as admin_router
+from app.modules.admin.router import me_router, router as admin_router
 from app.modules.ai.router import router as ai_router
 from app.modules.audit.router import router as audit_router
 from app.modules.documents.router import router as documents_router
@@ -22,7 +22,7 @@ APPEND_ONLY_TABLES = ["audit_event", "signature", "record_state_transition", "re
 def create_app() -> FastAPI:
     assert_production_safe()
     api = FastAPI(title="VeraPlex", version="0.1.0")
-    for r in (quality_router, documents_router, ai_router, audit_router, admin_router):
+    for r in (quality_router, documents_router, ai_router, audit_router, admin_router, me_router):
         api.include_router(r, prefix="/api/v1")
 
     @api.get("/healthz")

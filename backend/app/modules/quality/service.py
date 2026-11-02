@@ -2,7 +2,11 @@ import uuid
 from datetime import date, timedelta
 
 from fastapi import HTTPException
+import hashlib
+import json
+
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.clock import utcnow
@@ -10,7 +14,7 @@ from app.core.config import settings
 from app.core.security import Principal
 from app.modules.audit import service as audit
 from app.modules.quality import rules
-from app.modules.quality.models import Capa, Deviation, Investigation
+from app.modules.quality.models import Capa, Deviation, IdempotencyKey, Investigation
 from app.modules.records import service as records
 
 
@@ -107,3 +111,26 @@ def capa_transition(db: Session, p: Principal, capa: Capa, to: str, reason: str)
             reason="scheduled automatically on approval",
         )
     return r
+
+
+def raise_deviation_idempotent(db: Session, p: Principal, content: dict, key: str | None) -> tuple[Deviation, bool]:
+    """Returns (deviation, created). A replay of the same key+payload returns the original."""
+    if not key:
+        return raise_deviation(db, p, content), True
+    if not 8 <= len(key) <= 128:
+        raise HTTPException(422, "Idempotency-Key must be 8-128 characters")
+    h = hashlib.sha256(json.dumps(content, sort_keys=True, default=str).encode()).hexdigest()
+    try:
+        with db.begin_nested():
+            row = IdempotencyKey(tenant_id=p.tenant_id, user_id=p.user_id, key=key, request_hash=h)
+            db.add(row)
+            db.flush()
+    except IntegrityError:
+        row = db.scalars(select(IdempotencyKey).where(
+            IdempotencyKey.tenant_id == p.tenant_id, IdempotencyKey.user_id == p.user_id, IdempotencyKey.key == key)).one()
+        if row.request_hash != h:
+            raise HTTPException(422, "Idempotency-Key was already used with a different payload")
+        return get_deviation(db, p, row.record_id), False
+    d = raise_deviation(db, p, content)
+    row.record_id = d.record_id
+    return d, True

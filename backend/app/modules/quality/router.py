@@ -1,7 +1,7 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,6 +21,9 @@ class DeviationIn(BaseModel):
     batch_id: str | None = None
     equipment_id: str | None = None
     area: str | None = None
+    # Client-reported times for offline capture. Stored as claims; the server time is the authoritative record time.
+    occurred_at: datetime | None = None
+    client_captured_at: datetime | None = None
 
 
 class TriageIn(BaseModel):
@@ -66,8 +69,10 @@ def _dev_view(db, p, d: Deviation):
 
 
 @router.post("/deviations", status_code=201)
-def create_deviation(body: DeviationIn, p: Principal = Depends(require("deviation.create")), db: Session = Depends(get_db)):
-    d = service.raise_deviation(db, p, body.model_dump(mode="json"))
+def create_deviation(body: DeviationIn, response: Response, p: Principal = Depends(require("deviation.create")),
+                     db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None)):
+    d, created = service.raise_deviation_idempotent(db, p, body.model_dump(mode="json"), idempotency_key)
+    response.status_code = 201 if created else 200
     return _dev_view(db, p, d)
 
 

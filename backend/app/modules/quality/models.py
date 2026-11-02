@@ -1,10 +1,10 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Uuid
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.database import Base
+from app.core.database import Base, new_id
 
 
 class Deviation(Base):
@@ -45,3 +45,15 @@ class ChangeControl(Base):
     capa_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("capa.record_id"), index=True)
     sop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sop.id"), index=True)
     new_revision_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sop_revision.record_id"), index=True)
+
+
+class IdempotencyKey(Base):
+    """Makes offline-queue retries safe: the same key from the same user never creates a second record."""
+    __tablename__ = "idempotency_key"
+    __table_args__ = (UniqueConstraint("tenant_id", "user_id", "key"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenant.id"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    record_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)

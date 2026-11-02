@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import Principal, require
+from app.core.security import Principal, get_principal, require
 from app.modules.admin import service
 from app.modules.identity.models import Membership, User
 
@@ -23,6 +23,15 @@ class PatchIn(BaseModel):
     role: str | None = None
     active: bool | None = None
     reason: str = Field(min_length=3)
+
+
+me_router = APIRouter(tags=["admin"])
+
+
+@me_router.get("/me")
+def me(p: Principal = Depends(get_principal)):
+    return {"user_id": p.user_id, "name": p.name, "role": p.role, "kind": p.kind, "tenant_id": p.tenant_id,
+            "permissions": sorted(x for x in p.permissions if p.can(x))}
 
 
 @router.post("/users", status_code=201)
