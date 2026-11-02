@@ -1,29 +1,82 @@
 # VeraPlex
 
-Pharmaceutical intelligence platform. Built from the "Pharmaceutical Intelligence Platform — Build Plan" (greenfield; the reference repositories in Phase 1 were never supplied).
+A compliance-first pharmaceutical intelligence platform. The first vertical slice is **Quality**: deviation → investigation → CAPA → SOP change control, with an AI assistant that drafts and never decides.
 
-## What exists (Phases 3–4 backbone, backend only)
+Built from the *Pharmaceutical Intelligence Platform — Build Plan*. It is greenfield: the reference repositories in the plan's Phase 1 were never supplied.
 
-`backend/` is a FastAPI modular monolith:
+> **Not validated.** Nothing in this repository makes a product Part 11 / Annex 11 compliant or GxP-validated. That requires customer-specific validation, procedures and independent review. See [Known gaps](#known-gaps).
 
-| Module | Delivers |
+## Architecture
+
+A single FastAPI **modular monolith** (`backend/`). Modules own their tables and may import only modules below them; `import-linter` enforces this in CI.
+
+```
+ai          Quality agent: non-human principal, read-scoped tools, draft-only writes
+admin       user provisioning (Supabase invite), role changes, deactivation
+quality     deviation, investigation, CAPA, change control, deterministic risk + recurrence rules
+documents   SOPs as controlled revisions, training assignment, acknowledgments, reminders
+records     versioned controlled records, state machines, re-auth e-signatures
+audit       hash-chained append-only audit trail
+identity    tenant, user, membership
+core        config, auth provider, principals, permissions, DB session
+```
+
+Key controls:
+
+- **Tenancy:** the tenant comes from the verified token's user, never the request. Postgres row-level security is the backstop (`app.tenant_id`); the app role is not the table owner.
+- **Audit:** every state change writes a SHA-256 hash-chained `audit_event` in the same transaction. UPDATE/DELETE are revoked in Postgres (triggers on SQLite). `GET /audit/verify` finds the first break.
+- **E-signatures:** require a fresh, single-use re-authentication for the same subject, a stated meaning, and are bound to the record version's content hash. Authors cannot approve their own records.
+- **Immutability:** locked versions never change; revisions go through change control.
+- **AI governance:** the AI runs as its own principal. Regulated permissions are on a backend human-only allowlist, so approve/sign/triage endpoints return 403 to it whatever the orchestrator asks. Drafts are labeled, cite source records, and adoption by a human is audited.
+- **Auth:** Supabase JWTs verified against the project JWKS (ES256/RS256/EdDSA) with issuer check; legacy HS256 only if a secret is configured. Production refuses to start with the dev secret.
+
+## Repository layout
+
+```
+backend/
+  app/{core,modules,api,workers}/   application code
+  migrations/versions/              Alembic: schema, RLS policies, append-only grants
+  tests/                            pytest suite (SQLite + real Postgres)
+.github/workflows/ci.yml            import-linter + pytest against a Postgres service
+```
+
+## Running it
+
+```bash
+cd backend
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+lint-imports && pytest -q                      # SQLite
+```
+
+Run the suite against real Postgres as a non-owner role under RLS (a superuser URL; the tests create `veraplex_test` and the `veraplex_app` role):
+
+```bash
+VERAPLEX_TEST_PG_URL='postgresql+psycopg://postgres:postgres@localhost:5432/postgres' pytest -q
+```
+
+Configuration is via `VERAPLEX_*` environment variables (`backend/app/core/config.py`): `DATABASE_URL`, `ENVIRONMENT`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_KEY`, and the rule parameters (recurrence window, training due days, ...). Apply the schema with Alembic (`alembic upgrade head`) and create the `veraplex_app` role first; connect the app as that role.
+
+## API at a glance (`/api/v1`)
+
+| Area | Endpoints |
 |---|---|
-| `core` | settings, provider interfaces (auth, AI model), principal + permission model, human-only allowlist |
-| `audit` | hash-chained, append-only `audit_event` per tenant; `verify_chain` (nightly-job entry point) |
-| `records` | versioned controlled records, state machines, locked versions, re-auth e-signatures bound to a content hash, segregation of duties |
-| `documents` | SOPs as controlled revisions (draft → review → approved → effective → superseded), reviewed/approved e-signatures, auto training assignment, re-auth read-and-understood acknowledgments, review/training reminders |
-| `quality` | deviation → triage (deterministic risk score) → investigation → CAPA → dual QA/area-owner approval → auto-scheduled effectiveness check; recurrence rule (3+ per equipment in 90 days); CAPA → change control → new SOP revision |
-| `ai` | Quality agent running as a non-human principal; draft-only write path; cited, labeled drafts; audited human adoption |
+| Deviations | `POST/GET /deviations`, `POST /deviations/{id}/triage`, `.../investigation`, `.../capas`, `.../ai-draft` |
+| Investigations | `PUT /investigations/{id}`, `POST .../complete` (e-sign) |
+| CAPA | `GET /capas/{id}`, `.../submit`, `.../sign`, `.../transition/{state}`, `.../change-controls` |
+| SOPs | `POST/GET /sops`, `.../revisions`, `/sop-revisions/{id}/{submit,sign,approve,make-effective}`, `/sops/reminders` |
+| Training | `GET /me/training`, `POST /training/{id}/acknowledge` (re-auth) |
+| AI | `POST /ai-drafts/{id}/adopt` |
+| Audit | `GET /audit/events`, `GET /audit/verify` |
+| Admin | `POST /admin/users`, `PATCH /admin/users/{id}`, `GET /admin/users` |
 
-Run the checks: `cd backend && pip install -e ".[dev]" && lint-imports && pytest -q`. Set `VERAPLEX_TEST_PG_URL` (a superuser URL) to also run the whole suite against real Postgres as a non-owner role under RLS; CI does this.
+## Known gaps
 
-## Not built yet / disclosed gaps
-
-- **Postgres is tested** (RLS, REVOKE on append-only tables, a guard that every tenant table has RLS). `membership` is deliberately outside RLS because the tenant is derived from it. Managed-Postgres specifics (Supabase roles, pooler transaction mode with `set_config(..., true)`) are unverified.
-- **No real LLM.** `StubModelProvider` returns a deterministic skeleton. LangGraph, the model gateway, and pgvector SOP search are Phase 4/5 work.
-- **AI draft adoption is audited but not separately e-signed**; the human signs when completing the investigation (`authored`). The plan's "signed adoption" needs a decision on signing an unlocked draft.
-- **Auth:** Supabase JWKS (ES256/RS256/EdDSA) and legacy HS256 verification are unit-tested with generated keys, not against a live Supabase project. Users/memberships are not yet provisioned from Supabase sign-up; there is no invite flow.
-- **SOP control:** effective date is always "now" (no scheduled go-live), no file attachments or PDF rendering, reminders are an endpoint/function with no scheduler or notifications yet.
-- **Not yet implemented:** offline mobile capture, Expo client, S3 documents, Celery jobs/outbox, entitlements/billing, site-scoped roles, 3D, other modules.
-- Risk-matrix band cut-offs (`quality/rules.py`) are provisional defaults pending QA-lead sign-off.
-- Nothing here makes the product Part 11 compliant or GxP-validated; that needs customer validation and qualified review.
+- **Auth** is tested with generated keys, not a live Supabase project. The Supabase invite call is untested against the real Admin API.
+- **Managed Postgres** specifics (Supabase roles, pooler transaction mode with `set_config(..., true)`) are unverified. `membership` is deliberately outside RLS because the tenant is derived from it.
+- **No real LLM.** `StubModelProvider` returns a deterministic skeleton. LangGraph, the model gateway and pgvector SOP search are not built.
+- **AI draft adoption** is audited but not separately e-signed; the human signs when completing the investigation.
+- **SOP control:** effective date is always "now"; no attachments/PDF rendering; reminders are a function/endpoint with no scheduler or notifications.
+- **Risk-matrix cut-offs** (`quality/rules.py`) are provisional pending QA-lead sign-off.
+- **Not built:** Expo client and offline capture, S3 documents, Celery jobs / transactional outbox, entitlements and billing, site-scoped roles, 3D views, the other modules.
+- The requirements matrix (clause → control → test → evidence) is not generated yet.
